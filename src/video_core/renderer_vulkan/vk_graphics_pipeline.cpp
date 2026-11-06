@@ -15,6 +15,7 @@
 #include <fmt/format.h>
 
 #include "video_core/renderer_vulkan/pipeline_helper.h"
+#include "video_core/renderer_vulkan/async_draw_policy.h"
 
 #include "common/bit_field.h"
 #include "common/scope_exit.h"
@@ -265,10 +266,37 @@ ConfigureFuncPtr ConfigureFunc(const std::array<bool, NUM_STAGES>& stages,
 }
 
 std::atomic<std::chrono::nanoseconds::rep> hold_time_ns{};
+std::atomic<u64> skipped_draws{};
+
+// EDEN_NX2_ASYNC_SKIP=0 makes every draw wait for its pipeline again, as before.
+bool AsyncSkipEnabled() {
+    static const bool enabled = [] {
+        const char* value = std::getenv("EDEN_NX2_ASYNC_SKIP");
+        return value == nullptr || value[0] != '0';
+    }();
+    return enabled;
+}
 } // Anonymous namespace
 
 std::chrono::nanoseconds GraphicsPipeline::TakeHoldTime() noexcept {
     return std::chrono::nanoseconds{hold_time_ns.exchange(0, std::memory_order::relaxed)};
+}
+
+u64 GraphicsPipeline::TakeSkippedDraws() noexcept {
+    return skipped_draws.exchange(0, std::memory_order::relaxed);
+}
+
+bool GraphicsPipeline::CanSkipWhileBuilding() {
+    if (!AsyncSkipEnabled()) {
+        return false;
+    }
+    const bool async_shaders = Settings::values.use_asynchronous_shaders.GetValue();
+    if (!async_shaders || writes_storage || key.state.xfb_enabled != 0) {
+        return false;
+    }
+    return CanSkipDrawWhileBuilding(
+        async_shaders, writes_storage, key.state.xfb_enabled != 0,
+        texture_cache.RenderTargetsRedrawnEachFrame(SkipWhileBuildingTargetFrames));
 }
 
 // TODO(crueter): This is the worst-formatted code I have EVER seen
@@ -404,6 +432,7 @@ void GraphicsPipeline::AddTransition(GraphicsPipeline* transition) {
 
 template <typename Spec>
 bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
+    skipped_while_building = false;
     boost::container::small_vector<VideoCommon::ImageViewInOut, 160> views;
     boost::container::small_vector<VideoCommon::SamplerId, 96> samplers;
     views.reserve(num_image_elements);
@@ -699,6 +728,12 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
         }
     }
     if (IsBuilt() && (!pipeline || build->Failed())) {
+        return false;
+    }
+    if (!IsBuilt() && CanSkipWhileBuilding()) {
+        // Checked after UpdateRenderTargets, which marks this frame's writes to the targets.
+        skipped_while_building = true;
+        skipped_draws.fetch_add(1, std::memory_order::relaxed);
         return false;
     }
     Profile::Scope scope{Profile::Zone::ConfigureDraw};

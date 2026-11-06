@@ -92,6 +92,16 @@ public:
 
     static std::chrono::nanoseconds TakeHoldTime() noexcept;
 
+    /// Draws that went without their pipeline while it was built (EDEN_NX2_ASYNC_SKIP) since the
+    /// last call.
+    static u64 TakeSkippedDraws() noexcept;
+
+    /// Whether the last Configure returned false because the draw was skipped while the pipeline
+    /// builds (not a failure: the next draws use the pipeline once it is ready).
+    [[nodiscard]] bool SkippedWhileBuilding() const noexcept {
+        return skipped_while_building;
+    }
+
     bool HasDynamicVertexInput() const noexcept { return key.state.dynamic_vertex_input; }
     const std::array<u64, 6>& ShaderHashes() const noexcept {
         return key.unique_hashes;
@@ -188,6 +198,9 @@ private:
 
     void MakePipeline(VkRenderPass render_pass);
 
+    /// Whether this draw may skip the pipeline that is still being built (async_draw_policy.h).
+    bool CanSkipWhileBuilding();
+
     void Validate();
 
     const GraphicsPipelineCacheKey key;
@@ -218,6 +231,7 @@ private:
     u32 num_textures{};
     bool fragment_has_color0_output{};
     bool writes_storage{};
+    bool skipped_while_building{};
 
     vk::DescriptorSetLayout descriptor_set_layout;
     DescriptorAllocator descriptor_allocator;

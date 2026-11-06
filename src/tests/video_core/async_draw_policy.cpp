@@ -68,3 +68,17 @@ TEST_CASE("Deferred emission falls back when its worker budget is full",
     }
     REQUIRE_FALSE(Vulkan::DefersShaderEmission(true, 0, 0));
 }
+
+TEST_CASE("Draws skip a building pipeline only when nothing they write outlives the frame",
+          "[video_core][async_draw]") {
+    // The one combination that may go without its pipeline.
+    REQUIRE(Vulkan::CanSkipDrawWhileBuilding(true, false, false, true));
+    // Async shaders off: every draw waits, as before.
+    REQUIRE_FALSE(Vulkan::CanSkipDrawWhileBuilding(false, false, false, true));
+    // Storage/image writes and transform feedback can feed later frames.
+    REQUIRE_FALSE(Vulkan::CanSkipDrawWhileBuilding(true, true, false, true));
+    REQUIRE_FALSE(Vulkan::CanSkipDrawWhileBuilding(true, false, true, true));
+    // A target the game does not redraw every frame (an atlas, a cached page) must not lose it.
+    REQUIRE_FALSE(Vulkan::CanSkipDrawWhileBuilding(true, false, false, false));
+    STATIC_REQUIRE(Vulkan::SkipWhileBuildingTargetFrames >= 2);
+}
