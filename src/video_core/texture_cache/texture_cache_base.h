@@ -279,6 +279,19 @@ public:
         return render_targets;
     }
 
+    /// Whether the bound render targets are redrawn from scratch every frame: each was written by
+    /// the GPU in each of the last `frames` frames (this one included) and at least one was
+    /// cleared whole in this frame or the previous one (UpdateRenderTargets should be called
+    /// before this). A draw into such targets that is dropped once shows for a single frame; one
+    /// into a target drawn rarely or filled a piece at a time (an atlas, cached pages) could stay
+    /// wrong.
+    [[nodiscard]] bool RenderTargetsRedrawnEachFrame(u32 frames) noexcept;
+
+    /// Records which bound targets a clear covers whole (the colour target `color_index` and/or
+    /// the depth-stencil target), for RenderTargetsRedrawnEachFrame. Call after
+    /// UpdateRenderTargets(true).
+    void NoteRenderTargetsCleared(bool color, u32 color_index, bool depth);
+
     /// Mark images in a range as modified from the CPU
     void WriteMemory(DAddr cpu_addr, size_t size);
 

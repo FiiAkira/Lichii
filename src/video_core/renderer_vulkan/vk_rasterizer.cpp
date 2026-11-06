@@ -763,6 +763,12 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func, bool is_in
         }
     }
     if (Profile::Scope scope{Profile::Zone::Configure}; !pipeline->Configure(is_indexed)) {
+        if (pipeline->SkippedWhileBuilding()) {
+            // Not a failure: the pipeline is being built and this draw's targets are redrawn
+            // every frame (EDEN_NX2_ASYNC_SKIP). Counted in the runtime pipeline report.
+            TraceRenderState(is_indexed, "skipped-while-building", nullptr);
+            return;
+        }
         report_failure("configure failed");
         TraceRenderState(is_indexed, "configure-failed", nullptr);
         return;
@@ -1532,6 +1538,8 @@ void RasterizerVulkan::Clear(u32 layer_count) {
 
     std::scoped_lock lock{texture_cache.mutex};
     texture_cache.UpdateRenderTargets(true);
+    texture_cache.NoteRenderTargetsCleared(use_color, regs.clear_surface.RT,
+                                           use_depth || use_stencil);
     const Framebuffer* const framebuffer = texture_cache.GetFramebuffer();
     if (frame_dump.Capturing()) {
         FrameDumpPass(framebuffer);

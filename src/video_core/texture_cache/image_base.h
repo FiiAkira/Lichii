@@ -129,6 +129,16 @@ struct ImageBase {
     VAddr cpu_addr_end = 0;
 
     u64 modification_tick = 0;
+    /// The texture cache frame the GPU last wrote this image in, and how many frames in a row
+    /// (ending there) it did. Render targets the game draws every frame (the scene, shadow maps,
+    /// G-buffers) build a streak; atlases and caches drawn once do not. Read by the async
+    /// pipeline policy (EDEN_NX2_ASYNC_SKIP) to tell which draws may skip a frame safely.
+    u64 last_written_frame = ~0ULL;
+    u32 written_frame_streak = 0;
+    /// The texture cache frame this image was last cleared whole in. Targets the game redraws
+    /// from scratch every frame are cleared (the depth buffer nearly always); a cache filled a
+    /// piece at a time over many frames (virtual texture pages) is not.
+    u64 last_cleared_frame = ~0ULL;
     size_t lru_index = SIZE_MAX;
 
     std::array<u32, MAX_MIP_LEVELS> mip_level_offsets{};
@@ -171,5 +181,43 @@ struct ImageAllocBase {
 };
 
 bool AddImageAlias(ImageBase& lhs, ImageBase& rhs, ImageId lhs_id, ImageId rhs_id);
+
+/// Records a GPU write to `image` in texture cache frame `frame` (see written_frame_streak).
+inline void NoteWrittenInFrame(ImageBase& image, u64 frame) noexcept {
+    if (image.last_written_frame == frame) {
+        return;
+    }
+    // ~0 + 1 wraps to 0: an image first written in frame 0 starts its streak at 1 as well.
+    image.written_frame_streak =
+        image.last_written_frame + 1 == frame ? image.written_frame_streak + 1 : 1;
+    image.last_written_frame = frame;
+}
+
+/// Whether `image` was cleared whole in texture cache frame `frame` or the one before it.
+[[nodiscard]] inline bool ClearedRecently(const ImageBase& image, u64 frame) noexcept {
+    return image.last_cleared_frame != ~0ULL && image.last_cleared_frame <= frame &&
+           frame - image.last_cleared_frame <= 1;
+}
+
+/// An image that takes over from `old` (a join of overlapping images) keeps the frames `old` was
+/// written and cleared in, so recreating a render target the game draws every frame does not
+/// restart its streak.
+inline void InheritWrittenFrames(ImageBase& image, const ImageBase& old) noexcept {
+    constexpr u64 Never = ~0ULL;
+    if (old.last_written_frame != Never) {
+        const bool newer = image.last_written_frame == Never ||
+                           old.last_written_frame > image.last_written_frame;
+        const bool longer = old.last_written_frame == image.last_written_frame &&
+                            old.written_frame_streak > image.written_frame_streak;
+        if (newer || longer) {
+            image.last_written_frame = old.last_written_frame;
+            image.written_frame_streak = old.written_frame_streak;
+        }
+    }
+    if (old.last_cleared_frame != Never &&
+        (image.last_cleared_frame == Never || old.last_cleared_frame > image.last_cleared_frame)) {
+        image.last_cleared_frame = old.last_cleared_frame;
+    }
+}
 
 } // namespace VideoCommon

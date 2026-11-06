@@ -2891,6 +2891,7 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
             const AliasedImage& aliased = new_image.aliased_images[alias_pointer->second];
             CopyImage(new_image_id, aliased.id, aliased.copies);
             new_image.modification_tick = overlap.modification_tick;
+            InheritWrittenFrames(new_image, overlap);
             continue;
         }
         if (True(overlap.flags & ImageFlagBits::GpuModified)) {
@@ -2906,6 +2907,7 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
                 runtime.CopyImage(new_image, overlap, copies);
             }
             new_image.modification_tick = overlap.modification_tick;
+            InheritWrittenFrames(new_image, overlap);
         }
         if (True(overlap.flags & ImageFlagBits::Tracked)) {
             UntrackImage(overlap, copy_object.id);
@@ -3728,6 +3730,55 @@ template <class P>
 void TextureCache<P>::MarkModification(ImageBase& image) noexcept {
     image.flags |= ImageFlagBits::GpuModified;
     image.modification_tick = ++modification_tick;
+    NoteWrittenInFrame(image, frame_tick);
+}
+
+template <class P>
+void TextureCache<P>::NoteRenderTargetsCleared(bool color, u32 color_index, bool depth) {
+    // UpdateRenderTargets(true) invalidates every bound target; only the ones this clear covers
+    // whole count as redrawn from scratch.
+    const auto note = [this](ImageViewId view_id) {
+        if (!view_id || !IsFullClear(view_id)) {
+            return;
+        }
+        const ImageViewBase& view = slot_image_views[view_id];
+        if (view.IsBuffer()) {
+            return;
+        }
+        slot_images[view.image_id].last_cleared_frame = frame_tick;
+    };
+    if (color && color_index < NUM_RT) {
+        note(render_targets.color_buffer_ids[color_index]);
+    }
+    if (depth) {
+        note(render_targets.depth_buffer_id);
+    }
+}
+
+template <class P>
+bool TextureCache<P>::RenderTargetsRedrawnEachFrame(u32 frames) noexcept {
+    if (rt_active_mask == 0) {
+        return false;
+    }
+    bool any_cleared = false;
+    const auto redrawn = [this, frames, &any_cleared](ImageId image_id) {
+        if (!image_id || image_id == CORRUPT_ID) {
+            return false;
+        }
+        const ImageBase& image = slot_images[image_id];
+        any_cleared |= ClearedRecently(image, frame_tick);
+        return image.last_written_frame == frame_tick && image.written_frame_streak >= frames;
+    };
+    for (size_t i = 0; i < NUM_RT; ++i) {
+        if ((rt_active_mask & (1u << i)) != 0 && !redrawn(rt_image_id[i])) {
+            return false;
+        }
+    }
+    if ((rt_active_mask & (1u << NUM_RT)) != 0 && !redrawn(rt_depth_image_id)) {
+        return false;
+    }
+    // A pass that clears none of its targets may be filling a cache a piece at a time.
+    return any_cleared;
 }
 
 template <class P>

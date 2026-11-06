@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <cstdlib>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -1365,8 +1366,20 @@ void PipelineCache::EvictUnusedPipelines() {
     }
     // Each built pipeline holds ~0.45 MB of driver memory and none was ever destroyed, so it grew
     // with every place a session went (title 1: 1,500 on its title screen alone). One unused for
-    // this long is destroyed; it takes 2-3 ms to build again from the driver's pipeline cache.
-    constexpr u64 EvictAfterFrames = 9000;
+    // this long is destroyed; the driver part takes 2-3 ms to build again from its pipeline cache,
+    // but the shaders are translated again on the GPU thread first. With 9,000 frames (~5 minutes
+    // at 30 fps) Ocarina evicted hundreds at a time and rebuilt them on each return to an area.
+    // The peak is the boot prebuild of the recent sessions' pipelines, which a longer window
+    // keeps for longer but does not raise. EDEN_NX2_PIPELINE_EVICT_FRAMES overrides it.
+    static const u64 EvictAfterFrames = [] {
+        constexpr u64 Default = 27000; // ~15 minutes at 30 fps
+        const char* value = std::getenv("EDEN_NX2_PIPELINE_EVICT_FRAMES");
+        if (value == nullptr) {
+            return Default;
+        }
+        const u64 frames = std::strtoull(value, nullptr, 10);
+        return frames >= 600 ? frames : Default;
+    }();
     if (frame_count <= EvictAfterFrames) {
         return;
     }
@@ -1917,9 +1930,10 @@ void ReportRuntimePipeline(const char* kind, std::chrono::steady_clock::time_poi
         LOG_INFO(Render_Vulkan,
                  "Runtime pipelines in the last 10 s: {} built, {:.1f} ms on the GPU thread "
                  "({:.1f} ms of it graphics SPIR-V), {:.1f} ms graphics SPIR-V on workers, "
-                 "{:.1f} ms of draws held for unbuilt pipelines",
+                 "{:.1f} ms of draws held for unbuilt pipelines, {} draws skipped while their "
+                 "pipeline built",
                  count, ms(total), ms(take(runtime_spirv_ns[0])), ms(take(runtime_spirv_ns[1])),
-                 ms(GraphicsPipeline::TakeHoldTime()));
+                 ms(GraphicsPipeline::TakeHoldTime()), GraphicsPipeline::TakeSkippedDraws());
         total = {};
         count = 0;
         window = now;
