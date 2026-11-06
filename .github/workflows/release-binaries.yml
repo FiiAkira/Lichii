@@ -539,11 +539,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Lancar fork: one platform only. A pattern matching a single artifact is extracted
+      # straight into `path`, so name it and give it its own directory, as the loop expects.
       - name: Download binaries
         uses: actions/download-artifact@v7
         with:
-          pattern: lichii-*-${{ github.sha }}
-          path: artifacts
+          name: lichii-windows-x86_64-pgo-${{ github.sha }}
+          path: artifacts/lichii-windows-x86_64-pgo-${{ github.sha }}
 
       - name: Package release files
         shell: bash
