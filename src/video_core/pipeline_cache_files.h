@@ -58,6 +58,25 @@ inline bool AdoptLegacyPipelineCache(const std::filesystem::path& legacy,
     return !error;
 }
 
+/// The newest version in [oldest, current) whose versioned file in `directory` has a matching
+/// header, or 0 when there is none (or a file of the current version exists already).
+[[nodiscard]] inline u32 NewestCompatiblePipelineCacheVersion(
+    const std::filesystem::path& directory, std::string_view stem,
+    const std::array<char, 8>& magic, u32 oldest, u32 current) {
+    std::error_code error;
+    if (std::filesystem::exists(VersionedPipelineCachePath(directory, stem, current), error) ||
+        error) {
+        return 0;
+    }
+    for (u32 version = current; version-- > oldest;) {
+        if (PipelineCacheHeaderMatches(VersionedPipelineCachePath(directory, stem, version), magic,
+                                       version)) {
+            return version;
+        }
+    }
+    return 0;
+}
+
 inline bool CopyCompatiblePipelineCache(const std::filesystem::path& source,
                                         const std::filesystem::path& destination,
                                         const std::array<char, 8>& magic, u32 source_version,

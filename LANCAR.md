@@ -42,14 +42,22 @@ is the boot prebuild of recent sessions' pipelines, which this keeps longer but 
 
 Switch: `EDEN_NX2_PIPELINE_EVICT_FRAMES=<frames>` (600 or more).
 
-## 3. Build
+## 3. A warm pipeline cache survives cache version bumps
+
+Each bump of `VulkanPipelineCacheVersion` starts a new `vulkan.fork-vN.bin`, and boot only carried
+over a v52 file. Upstream's 53 -> 54 bump therefore dropped every pipeline a v53 build had cached
+(4,056 for Ocarina here) and fell back to the older v52 file. Versions 52 and up store the same
+guest environments and keys, so boot now carries over the newest earlier version it finds
+(`NewestCompatiblePipelineCacheVersion`), for `vulkan`, `vulkan_used` and `vulkan_pipelines`.
+
+## 4. Build
 
 `release-binaries.yml` on the `lancar` branch builds only the Windows clang-cl ThinLTO + PGO
 package, with the update checker off (so the emulator does not offer upstream builds without these
 patches; this also drops the `lichii-updater` target). It compiles for Raptor Lake
 (`-march=raptorlake`), so the exe needs a 12th gen Intel Core or newer.
 
-## 4. Per-game settings used with it (Ocarina, i7-13650HX)
+## 5. Per-game settings used with it (Ocarina, i7-13650HX)
 
 `pin_gpu_threads=true`: the split GPU thread's front and back each get a P-core of their own and
 the guest cores run on the other four P-cores, away from the E-cores.

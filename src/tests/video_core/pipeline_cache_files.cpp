@@ -321,3 +321,47 @@ TEST_CASE("Cached compute failures retain their cause and the current dispatch a
     CHECK(entry->second.Get(false, 0x2120633c00, other) == nullptr);
     REQUIRE_THROWS_AS(entry->second.Get(true, 0x2120633c00, other), Shader::RuntimeError);
 }
+
+TEST_CASE("NewestCompatiblePipelineCacheVersion picks the newest earlier cache",
+          "[video_core][pipeline_cache]") {
+    const TempDir dir;
+    const auto path = [&](u32 version) {
+        return VideoCommon::VersionedPipelineCachePath(dir.path, "vulkan", version);
+    };
+
+    SECTION("nothing to carry over") {
+        REQUIRE(VideoCommon::NewestCompatiblePipelineCacheVersion(dir.path, "vulkan", Magic, 52,
+                                                                  54) == 0);
+    }
+
+    SECTION("a v53 cache wins over v52") {
+        WriteCache(path(52), Magic, 52, "old");
+        WriteCache(path(53), Magic, 53, "newer");
+        const u32 from =
+            VideoCommon::NewestCompatiblePipelineCacheVersion(dir.path, "vulkan", Magic, 52, 54);
+        REQUIRE(from == 53);
+        REQUIRE(VideoCommon::CopyCompatiblePipelineCache(path(from), path(54), Magic, from, 54));
+        REQUIRE(VideoCommon::PipelineCacheHeaderMatches(path(54), Magic, 54));
+        REQUIRE(ReadAll(path(54)).substr(12) == "newer");
+    }
+
+    SECTION("a file with a wrong header is passed over") {
+        WriteCache(path(52), Magic, 52, "old");
+        WriteCache(path(53), OtherMagic, 53, "driver");
+        REQUIRE(VideoCommon::NewestCompatiblePipelineCacheVersion(dir.path, "vulkan", Magic, 52,
+                                                                  54) == 52);
+    }
+
+    SECTION("an existing current cache is kept") {
+        WriteCache(path(53), Magic, 53, "newer");
+        WriteCache(path(54), Magic, 54, "current");
+        REQUIRE(VideoCommon::NewestCompatiblePipelineCacheVersion(dir.path, "vulkan", Magic, 52,
+                                                                  54) == 0);
+    }
+
+    SECTION("versions below the oldest compatible one are ignored") {
+        WriteCache(path(50), Magic, 50, "ancient");
+        REQUIRE(VideoCommon::NewestCompatiblePipelineCacheVersion(dir.path, "vulkan", Magic, 52,
+                                                                  54) == 0);
+    }
+}
