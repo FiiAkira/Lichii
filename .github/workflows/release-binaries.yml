@@ -283,7 +283,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          flags="-DWIN32 -D_WINDOWS -DNOMINMAX -flto=thin"
+          # lancar: tuned for Raptor Lake (i7-13650HX). The exe needs a 12th/13th/14th gen Intel
+          # Core (AVX2, AVX-VNNI) or newer; it will not start on older CPUs.
+          flags="-DWIN32 -D_WINDOWS -DNOMINMAX -flto=thin /clang:-march=raptorlake /clang:-mtune=raptorlake"
           if [ -n '${{ matrix.profile }}' ]; then
             flags+=" -fprofile-use=$(cygpath -m "$PWD/${{ matrix.profile }}")"
             flags+=" -Wno-error=profile-instr-out-of-date -Wno-error=profile-instr-unprofiled"
@@ -346,7 +348,7 @@ jobs:
         run: |
           if command -v ccache > /dev/null; then ccache --zero-stats; else sccache --zero-stats; fi
           targets="yuzu yuzu-cmd"
-          if [[ "${{ matrix.platform }}" == windows* ]]; then targets="$targets lichii-updater"; fi
+          # The lancar build turns the update checker off, which also drops the lichii-updater target.
           cmake --build build/release --target $targets --parallel
           if command -v ccache > /dev/null; then ccache --show-stats; else sccache --show-stats; fi
 

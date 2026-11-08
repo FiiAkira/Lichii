@@ -44,8 +44,15 @@ Switch: `EDEN_NX2_PIPELINE_EVICT_FRAMES=<frames>` (600 or more).
 
 ## 3. Build
 
-`release-binaries.yml` on the `lancar` branch builds only the Windows MSVC package, with the
-update checker off (so the emulator does not offer upstream builds without these patches).
+`release-binaries.yml` on the `lancar` branch builds only the Windows clang-cl ThinLTO + PGO
+package, with the update checker off (so the emulator does not offer upstream builds without these
+patches; this also drops the `lichii-updater` target). It compiles for Raptor Lake
+(`-march=raptorlake`), so the exe needs a 12th gen Intel Core or newer.
+
+## 4. Per-game settings used with it (Ocarina, i7-13650HX)
+
+`pin_gpu_threads=true`: the split GPU thread's front and back each get a P-core of their own and
+the guest cores run on the other four P-cores, away from the E-cores.
 
 ## Tests
 
